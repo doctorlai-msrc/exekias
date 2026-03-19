@@ -1,12 +1,40 @@
 ﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Exekias.Core;
+using Azure.Core;
 
 partial class Worker
 {
     BlobContainerClient CreateBlobContainerClient()
     {
-        return new BlobContainerClient(new Uri(Config.runStoreUrl), Credential);
+        // Default options
+        var options = new BlobClientOptions();
+
+        // Network timeout
+        string? netTimeoutStr = Environment.GetEnvironmentVariable("AZURE_STORAGE_HTTP_REQUEST_TIMEOUT");
+        if (!string.IsNullOrEmpty(netTimeoutStr) && double.TryParse(netTimeoutStr, out double netTimeoutSeconds))
+        {
+            options.Retry.NetworkTimeout = TimeSpan.FromSeconds(netTimeoutSeconds);
+        }
+
+        // Retry total max delay
+        string? retryMaxDelayStr = Environment.GetEnvironmentVariable("AZURE_STORAGE_RETRY_TOTAL_MAX_DELAY");
+        if (!string.IsNullOrEmpty(retryMaxDelayStr) && double.TryParse(retryMaxDelayStr, out double retryMaxSeconds))
+        {
+            options.Retry.MaxDelay = TimeSpan.FromSeconds(retryMaxSeconds);
+        }
+
+        // Retry mode
+        string? retryModeStr = Environment.GetEnvironmentVariable("AZURE_STORAGE_RETRY_MODE");
+        if (!string.IsNullOrEmpty(retryModeStr))
+        {
+            if (Enum.TryParse<RetryMode>(retryModeStr, ignoreCase: true, out var mode))
+            {
+                options.Retry.Mode = mode;
+            }
+        }
+
+        return new BlobContainerClient(new Uri(Config.runStoreUrl), Credential, options);
     }
 
     public async Task<int> DoDataLs(string run)
@@ -78,15 +106,41 @@ partial class Worker
         Task[] uploadTasks = await files.ToAsyncEnumerable().SelectAwait(async file =>
         {
             var blobClient = containerClient.GetBlobClient(file.blobName);
+            string? localFileHash = null;
+
             // upload file only if blob doesn't exist or older
             if (await blobClient.ExistsAsync())
             {
                 BlobProperties blobProperties = await blobClient.GetPropertiesAsync();
-                var localFileHash = Utils.ComputeSHA256(file.info.FullName);
-                var blobHash = blobProperties.Metadata.ContainsKey(SHA256_KEY) ? blobProperties.Metadata[SHA256_KEY] : null;
+                var blobHash = blobProperties.Metadata.ContainsKey(SHA256_KEY)
+                    ? blobProperties.Metadata[SHA256_KEY]
+                    : null;
 
-                if ((blobProperties.ContentLength == file.info.Length)
-                    && (string.Equals(blobHash, localFileHash, StringComparison.OrdinalIgnoreCase)))
+                bool isSame;
+
+                if (blobHash != null)
+                {
+                    // New logic: hash-based
+                    if (blobProperties.ContentLength == file.info.Length)
+                    {
+                        localFileHash = Utils.ComputeSHA256(file.info.FullName);
+                        isSame = string.Equals(blobHash, localFileHash, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        isSame = false;
+                    }
+                }
+                else
+                {
+                    // Fallback: legacy logic
+                    var blobLastWriteTime = BlobLastWriteTime(blobProperties);
+                    isSame =
+                        blobProperties.ContentLength == file.info.Length &&
+                        Math.Abs((blobLastWriteTime - file.info.LastWriteTimeUtc).TotalMilliseconds) < 1;
+                }
+
+                if (isSame)
                 {
                     if (verbosity > Verbosity.Normal)
                     {
@@ -115,7 +169,8 @@ partial class Worker
                 // set blob LastWriteTime metadata item to the file LastWriteTime value
                 var metadata = new Dictionary<string, string>();
                 metadata[LAST_WRITE_TIME] = (new DateTimeOffset(file.info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0).ToString("F3");
-                metadata[SHA256_KEY] = Utils.ComputeSHA256(file.info.FullName);
+                localFileHash ??= Utils.ComputeSHA256(file.info.FullName);
+                metadata[SHA256_KEY] = localFileHash;
                 await blobClient.SetMetadataAsync(metadata);
             });
         }).ToArrayAsync();
