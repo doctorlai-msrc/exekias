@@ -37,6 +37,14 @@ partial class Worker
         return new BlobContainerClient(new Uri(Config.runStoreUrl), Credential, options);
     }
 
+    static bool UseHashCompare()
+    {
+        string? value = Environment.GetEnvironmentVariable("AZURE_STORAGE_USE_HASH_COMPARE");
+        return !string.IsNullOrEmpty(value) &&
+               bool.TryParse(value, out bool result) &&
+               result;
+    }
+
     public async Task<int> DoDataLs(string run)
     {
         if (ConfigDoesNotExist)
@@ -101,6 +109,8 @@ partial class Worker
         // create ContainerClient object
         var containerClient = CreateBlobContainerClient();
         var verbosity = VerbosityLevel;
+        var useHashCompare = UseHashCompare();
+
         // enumerate all files in parallel from dir, recursively, and create upload tasks
         ProgressIndicator pi = CreateProgressIndicator();
         Task[] uploadTasks = await files.ToAsyncEnumerable().SelectAwait(async file =>
@@ -118,12 +128,13 @@ partial class Worker
 
                 bool isSame;
 
-                if (blobHash != null)
+                if (useHashCompare && blobHash != null)
                 {
-                    // New logic: hash-based
+                    // Hash-based logic is optional because it can be expensive for large files on slow disks.
                     if (blobProperties.ContentLength == file.info.Length)
                     {
                         localFileHash = Utils.ComputeSHA256(file.info.FullName);
+                        // WriteLine($"Comparing local file hash {localFileHash} with blob hash {blobHash} for {file.info.FullName}");
                         isSame = string.Equals(blobHash, localFileHash, StringComparison.OrdinalIgnoreCase);
                     }
                     else
@@ -133,7 +144,7 @@ partial class Worker
                 }
                 else
                 {
-                    // Fallback: legacy logic
+                    // Default / fallback: legacy logic
                     var blobLastWriteTime = BlobLastWriteTime(blobProperties);
                     isSame =
                         blobProperties.ContentLength == file.info.Length &&
@@ -144,7 +155,7 @@ partial class Worker
                 {
                     if (verbosity > Verbosity.Normal)
                     {
-                        WriteLine($"Skipping {file.info.FullName} because it is up to date (Hash={blobHash}).");
+                        WriteLine($"Skipping {file.info.FullName} because it is up to date.");
                     }
                     pi.NewProgress(-1).Report(0);  // report skipped
                     return Task.CompletedTask;
