@@ -87,7 +87,8 @@ partial class Worker
             dir.GetFiles("*", SearchOption.AllDirectories),
             fi => (
                 info: fi,
-                blobName: Path.GetRelativePath(dir.Parent.FullName, fi.FullName).Replace("\\", "/")
+                // dir.Parent can be NULL
+                blobName: Path.GetRelativePath((dir.Parent ?? dir).FullName, fi.FullName).Replace("\\", "/")
         ));
         // check that the directory contains a file matching regular expression runStoreMetadataFilePattern
         var metadataFilePattern = new System.Text.RegularExpressions.Regex(Config.runStoreMetadataFilePattern);
@@ -173,10 +174,11 @@ partial class Worker
         ProgressIndicator pi = CreateProgressIndicator();
 
         // Convert wildcard pattern (* and ?) to Regex
-        string regexPattern = "^" + Regex.Escape(pattern)
+        var normalizedPattern = pattern.Replace('\\', '/');  // normalize to forward slashes
+        string regexPattern = "^" + Regex.Escape(normalizedPattern)
             .Replace("\\*", ".*")
             .Replace("\\?", ".") + "$";
-        var regex = new Regex(regexPattern, RegexOptions.IgnoreCase);
+        var regex = new Regex(regexPattern, RegexOptions.None);
 
         await foreach (var blob in containerClient.GetBlobsAsync(prefix: prefix))
         {
