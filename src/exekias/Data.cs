@@ -1,6 +1,5 @@
 ﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
-using Exekias.Core;
 using Azure.Core;
 using System.Security.Cryptography;
 
