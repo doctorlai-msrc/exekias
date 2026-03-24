@@ -183,7 +183,7 @@ partial class Worker
 
                 if (useHashCompare)
                 {
-                    localFileHash ??= Utils.ComputeSHA256(file.info.FullName);
+                    localFileHash = Utils.ComputeSHA256(file.info.FullName);
                     metadata[SHA256_KEY] = localFileHash;
                 }
 
