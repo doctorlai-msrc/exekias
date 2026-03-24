@@ -2,6 +2,7 @@
 using Azure.Storage.Blobs.Models;
 using Exekias.Core;
 using Azure.Core;
+using System.Security.Cryptography;
 
 partial class Worker
 {
@@ -180,8 +181,13 @@ partial class Worker
                 // set blob LastWriteTime metadata item to the file LastWriteTime value
                 var metadata = new Dictionary<string, string>();
                 metadata[LAST_WRITE_TIME] = (new DateTimeOffset(file.info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0).ToString("F3");
-                localFileHash ??= Utils.ComputeSHA256(file.info.FullName);
-                metadata[SHA256_KEY] = localFileHash;
+
+                if (useHashCompare)
+                {
+                    localFileHash ??= Utils.ComputeSHA256(file.info.FullName);
+                    metadata[SHA256_KEY] = localFileHash;
+                }
+
                 await blobClient.SetMetadataAsync(metadata);
             });
         }).ToArrayAsync();
@@ -264,5 +270,18 @@ partial class Worker
         await Task.WhenAll(tasks);
         pi.Flush();
         return 0;
+    }
+}
+
+public class Utils
+{
+    public static string ComputeSHA256(string path)
+    {
+        if (path == null) throw new ArgumentNullException(nameof(path));
+
+        using var sha = SHA256.Create();
+        using var stream = File.OpenRead(path);
+        var hash = sha.ComputeHash(stream);
+        return BitConverter.ToString(hash).Replace("-", "");
     }
 }

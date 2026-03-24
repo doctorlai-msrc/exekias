@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Exekias.Core\Exekias.Core.csproj" />
+    <ProjectReference Include="..\exekias\exekias.csproj" />
   </ItemGroup>
 
 </Project>
