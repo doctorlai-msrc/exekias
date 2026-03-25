@@ -39,7 +39,7 @@ partial class Worker
 
     static bool UseHashCompare()
     {
-        string? value = Environment.GetEnvironmentVariable("AZURE_STORAGE_USE_HASH_COMPARE");
+        string? value = Environment.GetEnvironmentVariable(ENV_USE_HASH_COMPARE);
         return !string.IsNullOrEmpty(value) &&
                bool.TryParse(value, out bool result) &&
                result;
@@ -63,6 +63,7 @@ partial class Worker
         return 0;
     }
 
+    const string ENV_USE_HASH_COMPARE = "AZURE_STORAGE_USE_HASH_COMPARE";
     // blob metadata key
     const string LAST_WRITE_TIME = "LastWriteTimeSecondsSinceEpoch";
     // blob metadata key for SHA256 hash

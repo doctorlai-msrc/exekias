@@ -3,9 +3,8 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Xunit;
-using Exekias.Core;
 
-namespace Exekias.Core.Tests
+namespace exekias.Tests
 {
     public class SHA256Tests
     {
