@@ -2,6 +2,7 @@
 using Azure.Storage.Blobs.Models;
 using System.Text.RegularExpressions;
 using Azure.Core;
+using System.Security.Cryptography;
 
 partial class Worker
 {
@@ -37,6 +38,14 @@ partial class Worker
         return new BlobContainerClient(new Uri(Config.runStoreUrl), Credential, options);
     }
 
+    static bool UseHashCompare()
+    {
+        string? value = Environment.GetEnvironmentVariable(ENV_USE_HASH_COMPARE);
+        return !string.IsNullOrEmpty(value) &&
+               bool.TryParse(value, out bool result) &&
+               result;
+    }
+
     public async Task<int> DoDataLs(string run)
     {
         if (ConfigDoesNotExist)
@@ -55,8 +64,11 @@ partial class Worker
         return 0;
     }
 
+    const string ENV_USE_HASH_COMPARE = "AZURE_STORAGE_USE_HASH_COMPARE";
     // blob metadata key
     const string LAST_WRITE_TIME = "LastWriteTimeSecondsSinceEpoch";
+    // blob metadata key for SHA256 hash
+    const string SHA256_KEY = "sha256";
 
     static DateTimeOffset BlobLastWriteTime(BlobProperties blobProperties)
     {
@@ -100,17 +112,49 @@ partial class Worker
         // create ContainerClient object
         var containerClient = CreateBlobContainerClient();
         var verbosity = VerbosityLevel;
+        var useHashCompare = UseHashCompare();
+
         // enumerate all files in parallel from dir, recursively, and create upload tasks
         ProgressIndicator pi = CreateProgressIndicator();
         Task[] uploadTasks = await files.ToAsyncEnumerable().SelectAwait(async file =>
         {
             var blobClient = containerClient.GetBlobClient(file.blobName);
+            string? localFileHash = null;
+
             // upload file only if blob doesn't exist or older
             if (await blobClient.ExistsAsync())
             {
                 BlobProperties blobProperties = await blobClient.GetPropertiesAsync();
-                if (blobProperties.ContentLength == file.info.Length
-                    && Math.Abs((BlobLastWriteTime(blobProperties) - file.info.LastWriteTimeUtc).TotalMilliseconds) < 1)
+                var blobHash = blobProperties.Metadata.ContainsKey(SHA256_KEY)
+                    ? blobProperties.Metadata[SHA256_KEY]
+                    : null;
+
+                bool isSame;
+
+                if (useHashCompare && blobHash != null)
+                {
+                    // Hash-based logic is optional because it can be expensive for large files on slow disks.
+                    if (blobProperties.ContentLength == file.info.Length)
+                    {
+                        localFileHash = Utils.ComputeSHA256(file.info.FullName);
+                        // WriteLine($"Comparing local file hash {localFileHash} with blob hash {blobHash} for {file.info.FullName}");
+                        isSame = string.Equals(blobHash, localFileHash, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        isSame = false;
+                    }
+                }
+                else
+                {
+                    // Default / fallback: legacy logic
+                    var blobLastWriteTime = BlobLastWriteTime(blobProperties);
+                    isSame =
+                        blobProperties.ContentLength == file.info.Length &&
+                        Math.Abs((blobLastWriteTime - file.info.LastWriteTimeUtc).TotalMilliseconds) < 1;
+                }
+
+                if (isSame)
                 {
                     if (verbosity > Verbosity.Normal)
                     {
@@ -139,6 +183,13 @@ partial class Worker
                 // set blob LastWriteTime metadata item to the file LastWriteTime value
                 var metadata = new Dictionary<string, string>();
                 metadata[LAST_WRITE_TIME] = (new DateTimeOffset(file.info.LastWriteTimeUtc).ToUnixTimeMilliseconds() / 1000.0).ToString("F3");
+
+                if (useHashCompare)
+                {
+                    localFileHash = Utils.ComputeSHA256(file.info.FullName);
+                    metadata[SHA256_KEY] = localFileHash;
+                }
+
                 await blobClient.SetMetadataAsync(metadata);
             });
         }).ToArrayAsync();
@@ -241,4 +292,17 @@ partial class Worker
         return 0;
     }
 
+}
+
+public class Utils
+{
+    public static string ComputeSHA256(string path)
+    {
+        if (path == null) throw new ArgumentNullException(nameof(path));
+
+        using var sha = SHA256.Create();
+        using var stream = File.OpenRead(path);
+        var hash = sha.ComputeHash(stream);
+        return BitConverter.ToString(hash).Replace("-", "");
+    }
 }

@@ -30,6 +30,13 @@ partial class Worker
         WriteLine($"Resource group: {resourceGroup.Data.Name} ({resourceGroup.Data.Location})");
         WriteLine($"Blob container: {Config.runStoreUrl}");
         WriteLine($"Blob metadata file pattern: {Config.runStoreMetadataFilePattern}");
+        string? useHashCompareRaw = Environment.GetEnvironmentVariable(ENV_USE_HASH_COMPARE);
+        bool useHashCompare = !string.IsNullOrEmpty(useHashCompareRaw)
+            && bool.TryParse(useHashCompareRaw, out bool parsed)
+            && parsed;
+        WriteLine("Environment overrides:");
+        WriteLine($"  {ENV_USE_HASH_COMPARE}: {useHashCompareRaw ?? "<not set>"} (effective: {useHashCompare})");
+        WriteLine("    Set to 'true' to compare local and remote SHA256 before upload.");
         return 0;
     }
 
