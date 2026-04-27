@@ -95,7 +95,7 @@ try {
         finally {
             $driveX = Get-PSDrive -Name X -ErrorAction SilentlyContinue
             if ($driveX) {
-                subst x: /D x: 2>&$null
+                subst x: /D 2>$null
             }
         }
     }
