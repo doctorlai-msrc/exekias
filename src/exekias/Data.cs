@@ -1,7 +1,7 @@
 ﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
-using System.Text.RegularExpressions;
 using Azure.Core;
+using System.IO.Enumeration;
 using System.Security.Cryptography;
 
 partial class Worker
@@ -224,20 +224,16 @@ partial class Worker
         var tasks = new List<Task>();
         ProgressIndicator pi = CreateProgressIndicator();
 
-        // Convert wildcard pattern (* and ?) to Regex
-        var normalizedPattern = pattern.Replace('\\', '/');  // normalize to forward slashes
-        string regexPattern = "^" + Regex.Escape(normalizedPattern)
-            .Replace("\\*", ".*")
-            .Replace("\\?", ".") + "$";
-        var regex = new Regex(regexPattern, RegexOptions.None);
+        // Normalize pattern to forward slashes for consistent matching
+        var normalizedPattern = pattern.Replace('\\', '/');
 
         await foreach (var blob in containerClient.GetBlobsAsync(prefix: prefix))
         {
             // Extract the relative blob name (strip the prefix)
             var relativeName = blob.Name.Substring(prefix.Length);
 
-            // Match only blobs that satisfy the pattern
-            if (!regex.IsMatch(relativeName))
+            // Match only blobs that satisfy the glob pattern
+            if (!FileSystemName.MatchesSimpleExpression(normalizedPattern, relativeName, ignoreCase: false))
                 continue;
 
             var blobClient = containerClient.GetBlobClient(blob.Name);
