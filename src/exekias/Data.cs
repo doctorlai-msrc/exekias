@@ -99,8 +99,7 @@ partial class Worker
             dir.GetFiles("*", SearchOption.AllDirectories),
             fi => (
                 info: fi,
-                // dir.Parent can be NULL
-                blobName: Path.GetRelativePath((dir.Parent ?? dir).FullName, fi.FullName).Replace("\\", "/")
+                blobName: Path.GetRelativePath(dir.Parent!.FullName, fi.FullName).Replace("\\", "/")
         ));
         // check that the directory contains a file matching regular expression runStoreMetadataFilePattern
         var metadataFilePattern = new System.Text.RegularExpressions.Regex(Config.runStoreMetadataFilePattern);
